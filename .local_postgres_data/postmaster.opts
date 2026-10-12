@@ -1,0 +1,1 @@
+F:/Third Year/Cloud/mini3/lexidesk-backend/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe "-D" "F:\Third Year\Cloud\mini3\lexidesk-backend\.local_postgres_data" "-p" "5432"

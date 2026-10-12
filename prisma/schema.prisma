@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================
+// ENUMS
+// =============================
+
+enum Role {
+  SUPER
+  PROPERTY_LAWYER
+  LITIGATION_LAWYER
+  CA
+}
+
+enum ClientStatus {
+  ACTION_NEEDED
+  WAITING_ON_CLIENT
+  UP_TO_DATE
+  CLOSED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  NEEDS_REVIEW
+}
+
+// =============================
+// USERS
+// =============================
+
+model User {
+  id           String  @id @default(cuid())
+  name         String
+  email        String  @unique
+  mobile       String  @unique
+  passwordHash String
+  isActive     Boolean @default(true)
+  role         Role
+
+  // Firm Settings
+  firmName    String?
+  firmAddress String?
+  firmPhone   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clients Client[]
+  notes   QuickNote[]
+
+  @@map("users")
+}
+
+// =============================
+// CLIENTS
+// =============================
+
+model Client {
+  id      String @id @default(cuid())
+  ownerId String // TENANT KEY: every query scoped by this
+
+  name       String
+  phone      String // WhatsApp number, E.164
+  matterType String // role-specific value as string
+
+  status ClientStatus @default(WAITING_ON_CLIENT)
+
+  details      Json   // role-specific fields, validated per role by Zod
+  keyDate      DateTime?
+  keyDateLabel String?
+
+  isBilled  Boolean @default(false)
+  scratchpad String  @default("")
+
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  owner        User                  @relation(fields: [ownerId], references: [id])
+  requirements DocumentRequirement[]
+  documents    Document[]
+  links        MagicLink[]
+
+  @@index([ownerId, status])
+  @@index([ownerId, keyDate])
+  @@map("clients")
+}
+
+// =============================
+// DOCUMENT REQUIREMENTS
+// =============================
+
+model DocumentRequirement {
+  id         String  @id @default(cuid())
+  clientId   String
+  label      String
+  category   String
+  isRequired Boolean @default(true)
+  sortOrder  Int
+
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@map("document_requirements")
+}
+
+// =============================
+// DOCUMENTS
+// =============================
+
+model Document {
+  id            String  @id @default(cuid())
+  clientId      String
+  requirementId String?
+  ownerId       String
+
+  s3Key    String @unique
+  fileName String
+  mimeType String
+  sizeBytes Int
+
+  category         String
+  verification     VerificationStatus @default(PENDING)
+  detectedType     String?
+  verificationNote String?
+  reviewedAt       DateTime?
+  uploadedAt       DateTime           @default(now())
+
+  client      Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  requirement DocumentRequirement? @relation(fields: [requirementId], references: [id])
+
+  @@index([ownerId, uploadedAt])
+  @@map("documents")
+}
+
+// =============================
+// MAGIC LINKS
+// =============================
+
+model MagicLink {
+  id        String  @id @default(cuid())
+  clientId  String
+  tokenHash String  @unique // SHA-256 of the raw token; raw token is NEVER stored
+
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  nudgedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("magic_links")
+}
+
+// =============================
+// QUICK NOTES
+// =============================
+
+model QuickNote {
+  id        String   @id @default(cuid())
+  ownerId   String
+  body      String
+  createdAt DateTime @default(now())
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("quick_notes")
+}
+
+// =============================
+// AUDIT LOGS
+// =============================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
