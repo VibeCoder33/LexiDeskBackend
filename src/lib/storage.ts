@@ -1,114 +1,165 @@
-import crypto from 'crypto'
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { logger } from './logger'
+import crypto from "crypto";
+import {
+    BlobServiceClient,
+    generateBlobSASQueryParameters,
+    BlobSASPermissions,
+    StorageSharedKeyCredential,
+} from "@azure/storage-blob";
+import { logger } from "./logger";
 
 export interface PresignUploadResult {
-  uploadUrl: string
-  s3Key: string
-  headers: Record<string, string>
+    uploadUrl: string;
+    s3Key: string;
+    headers: Record<string, string>;
 }
 
 export interface StorageService {
-  getPresignedUploadUrl(
-    s3Key: string,
-    mimeType: string,
-    contentLength: number
-  ): Promise<PresignUploadResult>
-  getPresignedDownloadUrl(s3Key: string, fileName: string): Promise<string>
+    getPresignedUploadUrl(
+        blobName: string,
+        mimeType: string,
+        contentLength: number,
+    ): Promise<PresignUploadResult>;
+    getPresignedDownloadUrl(
+        blobName: string,
+        fileName: string,
+    ): Promise<string>;
 }
 
-class AwsS3StorageService implements StorageService {
-  private s3: S3Client
-  private bucket: string
+class AzureBlobStorageService implements StorageService {
+    private blobServiceClient: BlobServiceClient;
+    private containerName: string;
+    private sharedKeyCredential?: StorageSharedKeyCredential;
 
-  constructor() {
-    this.bucket = process.env.S3_BUCKET ?? 'lexidesk-documents'
-    this.s3 = new S3Client({
-      region: process.env.AWS_REGION ?? 'ap-south-1',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'mock-key',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'mock-secret',
-      },
-    })
-  }
+    constructor() {
+        this.containerName = process.env.AZURE_CONTAINER_NAME ?? "documents";
+        const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 
-  async getPresignedUploadUrl(
-    s3Key: string,
-    mimeType: string,
-    _contentLength: number
-  ): Promise<PresignUploadResult> {
-    const command = new PutObjectCommand({
-      Bucket: this.bucket,
-      Key: s3Key,
-      ContentType: mimeType,
-    })
+        if (!connectionString) {
+            throw new Error("AZURE_STORAGE_CONNECTION_STRING is missing");
+        }
 
-    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn: 900 }) // 15 mins
-    return {
-      uploadUrl,
-      s3Key,
-      headers: {
-        'Content-Type': mimeType,
-      },
+        this.blobServiceClient =
+            BlobServiceClient.fromConnectionString(connectionString);
+
+        // Extract account name and key to sign SAS tokens
+        const accountName = /AccountName=([^;]+)/.exec(connectionString)?.[1];
+        const accountKey = /AccountKey=([^;]+)/.exec(connectionString)?.[1];
+
+        if (accountName && accountKey) {
+            this.sharedKeyCredential = new StorageSharedKeyCredential(
+                accountName,
+                accountKey,
+            );
+        }
     }
-  }
 
-  async getPresignedDownloadUrl(s3Key: string, fileName: string): Promise<string> {
-    const command = new GetObjectCommand({
-      Bucket: this.bucket,
-      Key: s3Key,
-      ResponseContentDisposition: `inline; filename="${encodeURIComponent(fileName)}"`,
-    })
+    async getPresignedUploadUrl(
+        blobName: string,
+        mimeType: string,
+        _contentLength: number,
+    ): Promise<PresignUploadResult> {
+        const containerClient = this.blobServiceClient.getContainerClient(
+            this.containerName,
+        );
+        const blobClient = containerClient.getBlobClient(blobName);
 
-    return getSignedUrl(this.s3, command, { expiresIn: 300 }) // 5 mins
-  }
+        if (!this.sharedKeyCredential)
+            throw new Error("Missing Azure Credentials for SAS");
+
+        const sasToken = generateBlobSASQueryParameters(
+            {
+                containerName: this.containerName,
+                blobName: blobName,
+                permissions: BlobSASPermissions.parse("cw"), // create and write
+                startsOn: new Date(),
+                expiresOn: new Date(new Date().valueOf() + 15 * 60 * 1000), // 15 mins
+            },
+            this.sharedKeyCredential,
+        ).toString();
+
+        return {
+            uploadUrl: `${blobClient.url}?${sasToken}`,
+            s3Key: blobName, // Keeping the variable name 's3Key' so we don't have to rewrite the rest of your app
+            headers: {
+                "x-ms-blob-type": "BlockBlob",
+                "Content-Type": mimeType,
+            },
+        };
+    }
+
+    async getPresignedDownloadUrl(
+        blobName: string,
+        fileName: string,
+    ): Promise<string> {
+        const containerClient = this.blobServiceClient.getContainerClient(
+            this.containerName,
+        );
+        const blobClient = containerClient.getBlobClient(blobName);
+
+        if (!this.sharedKeyCredential)
+            throw new Error("Missing Azure Credentials for SAS");
+
+        const sasToken = generateBlobSASQueryParameters(
+            {
+                containerName: this.containerName,
+                blobName: blobName,
+                permissions: BlobSASPermissions.parse("r"), // read only
+                startsOn: new Date(),
+                expiresOn: new Date(new Date().valueOf() + 5 * 60 * 1000), // 5 mins
+                contentDisposition: `inline; filename="${encodeURIComponent(fileName)}"`,
+            },
+            this.sharedKeyCredential,
+        ).toString();
+
+        return `${blobClient.url}?${sasToken}`;
+    }
 }
 
 class LocalMockStorageService implements StorageService {
-  async getPresignedUploadUrl(
-    s3Key: string,
-    mimeType: string,
-    _contentLength: number
-  ): Promise<PresignUploadResult> {
-    const appUrl = process.env.PUBLIC_APP_URL ?? 'http://localhost:3001'
-    return {
-      uploadUrl: `${appUrl}/api/mock-upload?key=${encodeURIComponent(s3Key)}`,
-      s3Key,
-      headers: {
-        'Content-Type': mimeType,
-      },
+    async getPresignedUploadUrl(
+        s3Key: string,
+        mimeType: string,
+        _contentLength: number,
+    ): Promise<PresignUploadResult> {
+        const appUrl = process.env.PUBLIC_APP_URL ?? "http://localhost:3001";
+        return {
+            uploadUrl: `${appUrl}/api/mock-upload?key=${encodeURIComponent(s3Key)}`,
+            s3Key,
+            headers: { "Content-Type": mimeType },
+        };
     }
-  }
 
-  async getPresignedDownloadUrl(s3Key: string, fileName: string): Promise<string> {
-    const appUrl = process.env.PUBLIC_APP_URL ?? 'http://localhost:3001'
-    return `${appUrl}/api/mock-download?key=${encodeURIComponent(s3Key)}&name=${encodeURIComponent(fileName)}`
-  }
+    async getPresignedDownloadUrl(
+        s3Key: string,
+        fileName: string,
+    ): Promise<string> {
+        const appUrl = process.env.PUBLIC_APP_URL ?? "http://localhost:3001";
+        return `${appUrl}/api/mock-download?key=${encodeURIComponent(s3Key)}&name=${encodeURIComponent(fileName)}`;
+    }
 }
 
-const isAwsConfigured =
-  process.env.S3_DRIVER !== 'local' &&
-  Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET)
+const isAzureConfigured =
+    process.env.STORAGE_DRIVER !== "local" &&
+    Boolean(process.env.AZURE_STORAGE_CONNECTION_STRING);
 
-export const storageService: StorageService = isAwsConfigured
-  ? new AwsS3StorageService()
-  : new LocalMockStorageService()
+export const storageService: StorageService = isAzureConfigured
+    ? new AzureBlobStorageService()
+    : new LocalMockStorageService();
 
 logger.info(
-  { driver: isAwsConfigured ? 'AWS S3' : 'Local/Mock' },
-  'Storage service initialized'
-)
+    { driver: isAzureConfigured ? "Azure Blob" : "Local/Mock" },
+    "Storage service initialized",
+);
 
 export function generateSafeS3Key(
-  ownerId: string,
-  clientId: string,
-  fileName: string
+    ownerId: string,
+    clientId: string,
+    fileName: string,
 ): string {
-  const uuid = crypto.randomUUID()
-  const sanitized = fileName
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]/g, '_')
-    .slice(0, 80)
-  return `owners/${ownerId}/clients/${clientId}/${uuid}-${sanitized}`
+    const uuid = crypto.randomUUID();
+    const sanitized = fileName
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]/g, "_")
+        .slice(0, 80);
+    return `owners/${ownerId}/clients/${clientId}/${uuid}-${sanitized}`;
 }
