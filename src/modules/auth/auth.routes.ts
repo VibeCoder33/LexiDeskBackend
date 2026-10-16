@@ -23,7 +23,7 @@ router.post(
 
 // Authenticated
 router.get("/me", authenticate, authController.authMe);
-router.post("/logout", authenticate, authController.logout);
+router.post("/logout", authController.logout);
 router.patch(
     "/me/firm",
     authenticate,

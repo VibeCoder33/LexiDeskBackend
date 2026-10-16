@@ -43,6 +43,21 @@ export const logout = (_req: Request, res: Response): void => {
         sameSite: isProd ? "none" : "lax",
         path: "/",
     });
+    res.clearCookie("auth_token", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        path: "/",
+    });
+    res.clearCookie("auth_token", {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        path: "/",
+    });
+    res.clearCookie("auth_token", {
+        path: "/",
+    });
     res.status(200).json({ message: "Logged out successfully" });
 };
 
