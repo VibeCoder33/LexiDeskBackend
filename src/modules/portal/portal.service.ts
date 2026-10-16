@@ -113,7 +113,7 @@ export async function completePortalUpload(
     }
 
     // Determine category
-    let category = "Other";
+    let category = "Uncategorized";
     let expectedLabel: string | undefined;
 
     if (input.requirementId) {
@@ -133,10 +133,6 @@ export async function completePortalUpload(
     const roleCategories = roleConfig
         ? roleConfig.documentCategories
         : ["Other"];
-
-    if (category === "Other" && roleCategories.length > 0) {
-        category = roleCategories[0] ?? "Other";
-    }
 
     // Create Document row in DB
     const document = await prisma.document.create({
@@ -180,13 +176,18 @@ export async function completePortalUpload(
                 roleCategories,
             });
 
+            const finalCategory = result.category;
+            const finalRequirementId =
+                finalCategory === "Uncategorized" ? null : document.requirementId;
+
             await prisma.document.update({
                 where: { id: document.id },
                 data: {
                     verification: result.status,
                     detectedType: result.detectedType,
-                    category: result.category,
+                    category: finalCategory,
                     verificationNote: result.reason ?? null,
+                    requirementId: finalRequirementId,
                 },
             });
 

@@ -303,6 +303,46 @@ export async function getClientById(userId: string, clientId: string) {
         throw new AppError("Client not found", 404);
     }
 
+    // Sanitize any previously misclassified documents (e.g. concept notes, AI files falsely placed in ID Proofs)
+    for (const doc of client.documents) {
+        const fn = doc.fileName.toLowerCase();
+        const isIdentity =
+            fn.includes("pan") ||
+            fn.includes("aadhaar") ||
+            fn.includes("aadhar") ||
+            fn.includes("passport") ||
+            fn.includes("voter") ||
+            fn.includes("driving") ||
+            fn.includes("identity");
+        const isUnrecognized =
+            fn.includes("concept") ||
+            fn.includes("ai_") ||
+            fn.includes("ai ") ||
+            fn.includes("ai-") ||
+            fn.includes("unknown") ||
+            fn.includes("unrecognized");
+
+        if (doc.category === "ID Proofs" && isUnrecognized && !isIdentity) {
+            doc.category = "Uncategorized";
+            doc.verification = "NEEDS_REVIEW" as any;
+            doc.detectedType = "UNRECOGNIZED_DOCUMENT";
+            doc.requirementId = null;
+            prisma.document
+                .update({
+                    where: { id: doc.id },
+                    data: {
+                        category: "Uncategorized",
+                        verification: "NEEDS_REVIEW",
+                        detectedType: "UNRECOGNIZED_DOCUMENT",
+                        requirementId: null,
+                        verificationNote:
+                            "Unrecognized document moved to Uncategorized for review",
+                    },
+                })
+                .catch(() => {});
+        }
+    }
+
     const latestLink = client.links[0] ?? null;
 
     return {
