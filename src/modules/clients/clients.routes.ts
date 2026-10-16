@@ -1,29 +1,43 @@
-import { Router } from 'express'
-import { authenticate } from '../../middlewares/auth.middleware'
-import { validate } from '../../middlewares/validate'
-import * as clientsController from './clients.controller'
+import { Router } from "express";
+import { authenticate } from "../../middlewares/auth.middleware";
+import { validate } from "../../middlewares/validate";
+import * as clientsController from "./clients.controller";
 import {
-  CreateClientSchema,
-  UpdateClientSchema,
-  UpdateScratchpadSchema,
-  UpdateRequirementsSchema,
-} from './clients.schema'
+    CreateClientSchema,
+    UpdateClientSchema,
+    UpdateScratchpadSchema,
+    UpdateRequirementsSchema,
+} from "./clients.schema";
 
-const router = Router()
+const router = Router();
 
-router.use(authenticate)
+router.use(authenticate);
 
-router.get('/', clientsController.getClients)
-router.post('/', validate(CreateClientSchema), clientsController.createClient)
+router.get("/", clientsController.getClients);
+router.post("/", validate(CreateClientSchema), clientsController.createClient);
 
-router.get('/:id', clientsController.getClientById)
-router.patch('/:id', validate(UpdateClientSchema), clientsController.updateClient)
-router.patch('/:id/scratchpad', validate(UpdateScratchpadSchema), clientsController.updateScratchpad)
-router.put('/:id/requirements', validate(UpdateRequirementsSchema), clientsController.updateRequirements)
+router.get("/:id", clientsController.getClientById);
+router.patch(
+    "/:id",
+    validate(UpdateClientSchema),
+    clientsController.updateClient,
+);
+router.patch(
+    "/:id/scratchpad",
+    validate(UpdateScratchpadSchema),
+    clientsController.updateScratchpad,
+);
+router.put(
+    "/:id/requirements",
+    validate(UpdateRequirementsSchema),
+    clientsController.updateRequirements,
+);
+// Update Client Status (Close/Reopen)
+router.patch("/:id/status", clientsController.updateStatus);
 
-router.post('/:id/link/regenerate', clientsController.regenerateLink)
-router.post('/:id/link/revoke', clientsController.revokeLink)
-router.post('/:id/link/restore', clientsController.restoreLink)
-router.post('/:id/nudge', clientsController.nudgeClient)
+router.post("/:id/link/regenerate", clientsController.regenerateLink);
+router.post("/:id/link/revoke", clientsController.revokeLink);
+router.post("/:id/link/restore", clientsController.restoreLink);
+router.post("/:id/nudge", clientsController.nudgeClient);
 
-export default router
+export default router;

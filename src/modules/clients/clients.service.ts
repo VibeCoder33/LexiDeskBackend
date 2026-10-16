@@ -362,6 +362,16 @@ export async function updateClient(
     return updated;
 }
 
+export const updateClientStatus = async (
+    id: string,
+    status: "ACTION_NEEDED" | "WAITING_ON_CLIENT" | "UP_TO_DATE" | "CLOSED",
+) => {
+    return await prisma.client.update({
+        where: { id },
+        data: { status },
+    });
+};
+
 export async function updateScratchpad(
     userId: string,
     clientId: string,
